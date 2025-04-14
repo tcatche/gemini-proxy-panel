@@ -633,7 +633,8 @@ function hideError(container = errorMessageDiv) {
         const style = document.createElement('style');
         style.textContent = `
             .toggle-checkbox:checked {
-                transform: translateX(100%);
+                /* Adjusted translation to keep handle within bounds */
+                transform: translateX(1rem); /* Was 100% */
                 border-color: #68D391;
             }
             .toggle-checkbox:checked + .toggle-label {
@@ -908,40 +909,106 @@ function hideError(container = errorMessageDiv) {
 
     // --- Event Handlers ---
 
-    // Add Gemini Key (no changes needed)
+    // Add Gemini Key with support for batch input
     addGeminiKeyForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(addGeminiKeyForm);
         const data = Object.fromEntries(formData.entries());
-        const geminiKeyValue = data.key ? data.key.trim() : '';
+        const geminiKeyInput = data.key ? data.key.trim() : '';
 
-        // --- Gemini API Key Format Validation ---
-        const geminiKeyRegex = /^AIzaSy[A-Za-z0-9_-]{33}$/;
-        if (!geminiKeyValue) {
+        // Check if input is empty
+        if (!geminiKeyInput) {
              showError("API Key Value is required.");
              return;
         }
-        if (!geminiKeyRegex.test(geminiKeyValue)) {
-            showError("Invalid Gemini API Key format.");
-            return; // Stop submission if format is incorrect
+
+        // Split input, supporting comma-separated keys
+        const geminiKeys = geminiKeyInput.split(',').map(key => key.trim()).filter(key => key !== '');
+        
+        // Check if there are any keys to process
+        if (geminiKeys.length === 0) {
+            showError("No valid API Keys found.");
+            return;
         }
-        // --- End Validation ---
 
-        // Create the data object to send, without the id field
-        const keyData = {
-            key: geminiKeyValue,
-            name: data.name ? data.name.trim() : ''
-        };
-
-        const result = await apiFetch('/gemini-keys', {
-            method: 'POST',
-            body: JSON.stringify(keyData),
-        });
-
-        if (result && result.success) {
-            addGeminiKeyForm.reset();
-            await loadGeminiKeys(); // Wait for the list to reload
-            showSuccess('Gemini key added successfully!');
+        // Gemini API Key format validation regex
+        const geminiKeyRegex = /^AIzaSy[A-Za-z0-9_-]{33}$/;
+        
+        // Check format and remove duplicates
+        const validKeys = [];
+        const invalidKeys = [];
+        const seenKeys = new Set();
+        
+        for (const key of geminiKeys) {
+            // Skip duplicates
+            if (seenKeys.has(key)) {
+                continue;
+            }
+            
+            seenKeys.add(key);
+            
+            // Validate format
+            if (!geminiKeyRegex.test(key)) {
+                invalidKeys.push(key);
+            } else {
+                validKeys.push(key);
+            }
+        }
+        
+        // If no valid keys, exit
+        if (validKeys.length === 0) {
+            showError("No valid API Keys found. Please check the format.");
+            return;
+        }
+        
+        // Show warnings about invalid keys but continue with valid ones
+        if (invalidKeys.length > 0) {
+            const maskedInvalidKeys = invalidKeys.map(key => {
+                if (key.length > 10) {
+                    return `${key.substring(0, 6)}...${key.substring(key.length - 4)}`;
+                }
+                return key;
+            });
+            showError(`Invalid API key format detected: ${maskedInvalidKeys.join(', ')}`);
+        }
+        
+        // 改为串行处理API密钥添加，避免并发请求导致的问题
+        showLoading();
+        let successCount = 0;
+        
+        // 逐个处理每个API Key
+        for (const key of validKeys) {
+            const keyData = {
+                key: key,
+                name: data.name ? data.name.trim() : ''
+            };
+            
+            try {
+                const result = await apiFetch('/gemini-keys', {
+                    method: 'POST',
+                    body: JSON.stringify(keyData),
+                });
+                
+                if (result && result.success) {
+                    successCount++;
+                }
+            } catch (error) {
+                console.error(`Error adding key ${key}:`, error);
+                // 继续处理下一个密钥
+            }
+        }
+        
+        const failureCount = validKeys.length - successCount;
+        
+        // Reset form and reload keys
+        addGeminiKeyForm.reset();
+        await loadGeminiKeys();
+        
+        // Show appropriate message based on results
+        if (successCount > 0) {
+            showSuccess(`Successfully added ${successCount} Gemini ${successCount === 1 ? 'key' : 'keys'}.`);
+        } else {
+            showError(`Failed to add any keys.`);
         }
     });
 
@@ -1020,11 +1087,25 @@ function hideError(container = errorMessageDiv) {
         // --- End Clear Gemini Key Error ---
     });
 
-     // Add Worker Key (no changes needed)
+     // Add Worker Key with validation
     addWorkerKeyForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(addWorkerKeyForm);
         const data = Object.fromEntries(formData.entries());
+        
+        // Validate worker key format - allow alphanumeric, hyphens, and underscores
+        const workerKeyValue = data.key?.trim();
+        if (!workerKeyValue) {
+            showError('Worker key is required.');
+            return;
+        }
+        
+        const validKeyRegex = /^[a-zA-Z0-9_\-]+$/;
+        if (!validKeyRegex.test(workerKeyValue)) {
+            showError('Worker key can only contain letters, numbers, underscores (_), and hyphens (-).');
+            return;
+        }
+        
         const result = await apiFetch('/worker-keys', {
             method: 'POST',
             body: JSON.stringify(data),
@@ -1074,9 +1155,16 @@ function hideError(container = errorMessageDiv) {
         }
     }
 
-    // Generate Random Worker Key (no changes needed)
+    // Generate Random Worker Key with valid format
     generateWorkerKeyBtn.addEventListener('click', () => {
-        const randomKey = 'wk-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        const validChars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let randomKey = 'sk-';
+        
+        for (let i = 0; i < 20; i++) {
+            const randomIndex = Math.floor(Math.random() * validChars.length);
+            randomKey += validChars[randomIndex];
+        }
+        
         workerKeyValueInput.value = randomKey;
     });
 
