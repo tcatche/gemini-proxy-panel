@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const errorTextSpan = document.getElementById('error-text');
     const successMessageDiv = document.getElementById('success-message');
     const successTextSpan = document.getElementById('success-text');
+    const geminiUsagesListDiv = document.getElementById('gemini-usages-list');
     const geminiKeysListDiv = document.getElementById('gemini-keys-list');
     const addGeminiKeyForm = document.getElementById('add-gemini-key-form');
     const workerKeysListDiv = document.getElementById('worker-keys-list');
@@ -70,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function hideError(container = errorMessageDiv) {
     container.classList.add('hidden');
-    const textSpan = container.querySelector('span#error-text'); 
+    const textSpan = container.querySelector('span#error-text');
     if (textSpan) textSpan.textContent = ''; // Only clear the message span
 }
 
@@ -105,7 +106,7 @@ function hideError(container = errorMessageDiv) {
 
         try {
             const response = await fetch(`/api/admin${endpoint}`, {
-                credentials: 'include', 
+                credentials: 'include',
                 ...options,
                 headers: {
                     ...defaultHeaders,
@@ -120,12 +121,12 @@ function hideError(container = errorMessageDiv) {
                 window.location.href = '/login';
                 return null;
             }
-            
+
             // Check for redirects that might indicate auth issues (302, 307, etc.)
             if (response.redirected) {
                 const redirectUrl = new URL(response.url);
                 // Check if redirected to login page or similar auth pages
-                if (redirectUrl.pathname.includes('login') || 
+                if (redirectUrl.pathname.includes('login') ||
                     !redirectUrl.pathname.includes('/api/admin')) {
                     console.log("Detected redirect to login page. Session likely expired.");
                     localStorage.removeItem('isLoggedIn');
@@ -133,7 +134,7 @@ function hideError(container = errorMessageDiv) {
                     return null;
                 }
             }
-            
+
             // Additional check for 3xx status codes
             if (response.status >= 300 && response.status < 400) {
                 console.log(`Redirect status detected: ${response.status}. Handling potential auth issue.`);
@@ -211,6 +212,15 @@ function hideError(container = errorMessageDiv) {
     }
 
 
+    const totalData = {
+        proUsage: 0,
+        proQuota: 0,
+        flashUsage: 0,
+        flashQuota: 0,
+        proModel: {},
+        flashModel: {},
+        customModel: {},
+    }
     async function renderGeminiKeys(keys) {
         geminiKeysListDiv.innerHTML = ''; // Clear previous list
         if (!keys || keys.length === 0) {
@@ -312,6 +322,8 @@ function hideError(container = errorMessageDiv) {
             // Pro Category Usage
             const proUsage = key.categoryUsage?.pro || 0;
             const proQuota = cachedCategoryQuotas.proQuota;
+            totalData.proUsage += proUsage;
+            totalData.proQuota += proQuota;
             const proQuotaDisplay = formatQuota(proQuota);
             const proRemaining = proQuota === Infinity ? Infinity : Math.max(0, proQuota - proUsage);
             const proRemainingDisplay = formatQuota(proRemaining);
@@ -331,10 +343,10 @@ function hideError(container = errorMessageDiv) {
             `;
 
             // Handle Pro category individual quota models
-            const proModelsWithIndividualQuota = cachedModels.filter(model => 
-                model.category === 'Pro' && 
-                model.individualQuota && 
-                key.modelUsage && 
+            const proModelsWithIndividualQuota = cachedModels.filter(model =>
+                model.category === 'Pro' &&
+                model.individualQuota &&
+                key.modelUsage &&
                 key.modelUsage[model.id] !== undefined
             );
 
@@ -342,8 +354,8 @@ function hideError(container = errorMessageDiv) {
             proModelsWithIndividualQuota.forEach(model => {
                     const modelId = model.id;
                     // Check if it's an object structure, if so, extract the count property
-                    const count = typeof key.modelUsage?.[modelId] === 'object' ? 
-                        (key.modelUsage?.[modelId]?.count || 0) : 
+                    const count = typeof key.modelUsage?.[modelId] === 'object' ?
+                        (key.modelUsage?.[modelId]?.count || 0) :
                         (key.modelUsage?.[modelId] || 0);
                     const quota = model.individualQuota;
                     const quotaDisplay = formatQuota(quota);
@@ -351,6 +363,15 @@ function hideError(container = errorMessageDiv) {
                     const remainingDisplay = formatQuota(remaining);
                     const remainingPercentage = calculateRemainingPercentage(count, quota);
                     const progressColor = getProgressColor(remainingPercentage);
+                    const proModel = totalData.proModel[modelId] || {
+                        modelId,
+                        remaining: 0,
+                        quota: 0,
+                        count: 0,
+                    }
+                    proModel.remaining += remaining;
+                    proModel.quota += quota;
+                    proModel.count += count;
 
                     modalHTML += `
                         <div class="mt-2">
@@ -369,6 +390,8 @@ function hideError(container = errorMessageDiv) {
             // Flash Category Usage
             const flashUsage = key.categoryUsage?.flash || 0;
             const flashQuota = cachedCategoryQuotas.flashQuota;
+            totalData.flashUsage += flashUsage;
+            totalData.flashQuota += flashQuota;
             const flashQuotaDisplay = formatQuota(flashQuota);
             const flashRemaining = flashQuota === Infinity ? Infinity : Math.max(0, flashQuota - flashUsage);
             const flashRemainingDisplay = formatQuota(flashRemaining);
@@ -386,12 +409,12 @@ function hideError(container = errorMessageDiv) {
                     </div>
                 </div>
             `;
-            
+
             // Handle Flash category individual quota models
-            const flashModelsWithIndividualQuota = cachedModels.filter(model => 
-                model.category === 'Flash' && 
-                model.individualQuota && 
-                key.modelUsage && 
+            const flashModelsWithIndividualQuota = cachedModels.filter(model =>
+                model.category === 'Flash' &&
+                model.individualQuota &&
+                key.modelUsage &&
                 key.modelUsage[model.id] !== undefined
             );
 
@@ -399,8 +422,8 @@ function hideError(container = errorMessageDiv) {
                 flashModelsWithIndividualQuota.forEach(model => {
                     const modelId = model.id;
                     // Check if it's an object structure, if so, extract the count property
-                    const count = typeof key.modelUsage?.[modelId] === 'object' ? 
-                        (key.modelUsage?.[modelId]?.count || 0) : 
+                    const count = typeof key.modelUsage?.[modelId] === 'object' ?
+                        (key.modelUsage?.[modelId]?.count || 0) :
                         (key.modelUsage?.[modelId] || 0);
                     const quota = model.individualQuota;
                     const quotaDisplay = formatQuota(quota);
@@ -408,6 +431,15 @@ function hideError(container = errorMessageDiv) {
                     const remainingDisplay = formatQuota(remaining);
                     const remainingPercentage = calculateRemainingPercentage(count, quota);
                     const progressColor = getProgressColor(remainingPercentage);
+                    const flashModel = totalData.flashModel[modelId] || {
+                        modelId,
+                        remaining: 0,
+                        quota: 0,
+                        count: 0,
+                    }
+                    flashModel.remaining += remaining;
+                    flashModel.quota += quota;
+                    flashModel.count += count;
 
                     modalHTML += `
                         <div class="mt-2">
@@ -444,15 +476,24 @@ function hideError(container = errorMessageDiv) {
 
                 customModelUsageEntries.forEach(([modelId, usageData]) => {
                     // Ensure count is obtained correctly, regardless of object structure
-                    const count = typeof usageData === 'object' ? 
+                    const count = typeof usageData === 'object' ?
                         (usageData.count || 0) : (usageData || 0);
-                    const quota = typeof usageData === 'object' ? 
+                    const quota = typeof usageData === 'object' ?
                         usageData.quota : undefined; // Quota is now included in the key data for custom models
                     const quotaDisplay = formatQuota(quota);
                     const remaining = quota === Infinity ? Infinity : Math.max(0, quota - count);
                     const remainingDisplay = formatQuota(remaining);
                     const remainingPercentage = calculateRemainingPercentage(count, quota);
                     const progressColor = getProgressColor(remainingPercentage);
+                    const customModel = totalData.customModel[modelId] || {
+                        modelId,
+                        remaining: 0,
+                        quota: 0,
+                        count: 0,
+                    }
+                    customModel.remaining += remaining;
+                    customModel.quota += quota;
+                    customModel.count += count;
 
                     modalHTML += `
                         <div>
@@ -586,6 +627,80 @@ function hideError(container = errorMessageDiv) {
         });
     }
 
+    async function renderGeminiUsages(keys) {
+        geminiUsagesListDiv.innerHTML = ''; // Clear previous list
+        if (!keys || keys.length === 0) {
+            geminiUsagesListDiv.innerHTML = '<p class="text-gray-500">No Gemini keys configured.</p>';
+            return;
+        }
+
+        // Ensure models and category quotas are cached (should be loaded in initialLoad)
+        if (cachedModels.length === 0) {
+            console.warn("Models cache is empty during renderGeminiKeys. Load may be incomplete.");
+        }
+        const { flashQuota, flashUsage, flashModel, proQuota, proUsage, proModel, customModel } = totalData;
+        const proQuotaDisplay = formatQuota(proQuota);
+        const proRemaining = proQuota === Infinity ? Infinity : Math.max(0, proQuota - proUsage);
+        const proRemainingDisplay = formatQuota(proRemaining);
+        const proRemainingPercentage = calculateRemainingPercentage(proUsage, proQuota);
+        const proProgressColor = getProgressColor(proRemainingPercentage);
+        const flashQuotaDisplay = formatQuota(flashQuota);
+        const flashRemaining = flashQuota === Infinity ? Infinity : Math.max(0, flashQuota - flashUsage);
+        const flashRemainingDisplay = formatQuota(flashRemaining);
+        const flashRemainingPercentage = calculateRemainingPercentage(flashUsage, flashQuota);
+        const flashProgressColor = getProgressColor(flashRemainingPercentage);
+
+        let htmlString = '';
+        htmlString += `
+            <div class="border-t border-gray-200 pt-4 mb-4">
+                <h3 class="text-lg font-medium text-gray-800 mb-3">Category Usage</h3>
+                <div class="space-y-4"></div>
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <span class="text-sm font-medium text-gray-700">Pro Models</span>
+                        <span class="text-sm font-medium text-gray-700">${proRemainingDisplay}/${proQuotaDisplay}</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div class="${proProgressColor} h-2.5 rounded-full" style="width: ${proRemainingPercentage}%"></div>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <div class="flex justify-between mb-1">
+                        <span class="text-sm font-medium text-gray-700">Flash Models</span>
+                        <span class="text-sm font-medium text-gray-700">${flashRemainingDisplay}/${flashQuotaDisplay}</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div class="${flashProgressColor} h-2.5 rounded-full" style="width: ${flashRemainingPercentage}%"></div>
+                    </div>
+                </div>
+                <h3 class="text-lg font-medium text-gray-800 mb-1 mt-3">Models Usage</h3>
+                ${
+                    [...Object.values(proModel), ...Object.values(flashModel), ...Object.values(customModel)].map(model => {
+                        const { count, modelId, remaining, quota } = model;
+                        const quotaDisplay = formatQuota(quota);
+                        const remainingDisplay = formatQuota(remaining);
+                        const remainingPercentage = calculateRemainingPercentage(count, quota);
+                        const progressColor = getProgressColor(remainingPercentage);
+                        return `
+                            <div class="mt-2">
+                                <div class="flex justify-between mb-1">
+                                    <span class="text-sm font-medium text-gray-700">${modelId}</span>
+                                    <span class="text-sm font-medium text-gray-700">${remainingDisplay}/${quotaDisplay}</span>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2.5">
+                                    <div class="${progressColor} h-2.5 rounded-full" style="width: ${remainingPercentage}%"></div>
+                                </div>
+                            </div>
+
+                        `
+                    })
+                }
+            </div>
+        `
+        console.log(htmlString)
+        geminiUsagesListDiv.innerHTML = htmlString
+    }
+
     function renderWorkerKeys(keys) {
         workerKeysListDiv.innerHTML = ''; // Clear previous list
         if (!keys || keys.length === 0) {
@@ -670,7 +785,7 @@ function hideError(container = errorMessageDiv) {
         models.forEach(model => {
             const item = document.createElement('div');
             item.className = 'p-3 border rounded-md flex items-center justify-between';
-            
+
             let quotaDisplay = model.category;
             if (model.category === 'Custom') {
                 quotaDisplay += ` (Quota: ${model.dailyQuota === undefined ? 'Unlimited' : model.dailyQuota})`;
@@ -683,7 +798,7 @@ function hideError(container = errorMessageDiv) {
             // Only show Set Individual Quota button for Pro and Flash models
             if (model.category === 'Pro' || model.category === 'Flash') {
                 actionsHtml = `
-                    <button data-id="${model.id}" data-category="${model.category}" data-quota="${model.individualQuota || 0}" 
+                    <button data-id="${model.id}" data-category="${model.category}" data-quota="${model.individualQuota || 0}"
                         class="set-individual-quota mr-2 text-blue-500 hover:text-blue-700 font-medium">
                         Set Quota
                     </button>
@@ -709,11 +824,11 @@ function hideError(container = errorMessageDiv) {
                 const modelId = e.target.dataset.id;
                 const category = e.target.dataset.category;
                 const currentQuota = parseInt(e.target.dataset.quota, 10);
-                
+
                 // Set the form values
                 individualQuotaModelIdInput.value = modelId;
                 individualQuotaValueInput.value = currentQuota || 0;
-                
+
                 // Show the modal
                 hideError(individualQuotaErrorDiv);
                 individualQuotaModal.classList.remove('hidden');
@@ -726,6 +841,7 @@ function hideError(container = errorMessageDiv) {
         const keys = await apiFetch('/gemini-keys');
         if (keys) {
             renderGeminiKeys(keys);
+            renderGeminiUsages(keys);
         } else {
              geminiKeysListDiv.innerHTML = '<p class="text-red-500">Failed to load Gemini keys.</p>';
         }
@@ -769,15 +885,15 @@ function hideError(container = errorMessageDiv) {
             console.log("No Gemini keys available, skipping model list fetch");
             return;
         }
-        
+
         try {
             const models = await apiFetch('/gemini-models');
             if (models && Array.isArray(models)) {
                 cachedGeminiModels = models;
-                
+
                 // Update the model-id input field to include dropdown
                 updateModelIdDropdown(models);
-                
+
                 console.log(`Loaded ${models.length} available Gemini models`);
             }
         } catch (error) {
@@ -788,7 +904,7 @@ function hideError(container = errorMessageDiv) {
     // Update the model-id input to include dropdown functionality
     function updateModelIdDropdown(models) {
         if (!modelIdInput) return;
-        
+
         // Create custom dropdown menu
         const createCustomDropdown = () => {
             // Remove old dropdown menu (if it exists)
@@ -796,7 +912,7 @@ function hideError(container = errorMessageDiv) {
             if (existingDropdown) {
                 existingDropdown.remove();
             }
-            
+
             // Create new dropdown menu container
             const dropdownContainer = document.createElement('div');
             dropdownContainer.id = 'custom-model-dropdown';
@@ -804,18 +920,18 @@ function hideError(container = errorMessageDiv) {
             dropdownContainer.style.maxHeight = '200px';
             dropdownContainer.style.overflowY = 'auto';
             dropdownContainer.style.border = '1px solid #d1d5db';
-            
+
             // Add model options to the dropdown menu
             models.forEach(model => {
                 const option = document.createElement('div');
                 option.className = 'cursor-pointer select-none relative py-2 pl-3 pr-9 hover:bg-gray-100';
                 option.textContent = model.id;
                 option.dataset.value = model.id;
-                
+
                 option.addEventListener('click', () => {
                     modelIdInput.value = model.id;
                     dropdownContainer.classList.add('hidden');
-                    
+
                     // Automatically select category based on model name
                     const modelValue = model.id.toLowerCase();
                     if (modelValue.includes('pro')) {
@@ -827,32 +943,32 @@ function hideError(container = errorMessageDiv) {
                         customQuotaDiv.classList.add('hidden');
                         modelQuotaInput.required = false;
                     }
-                    
+
                     // Trigger input event so other listeners can respond
                     modelIdInput.dispatchEvent(new Event('input'));
                 });
-                
+
                 dropdownContainer.appendChild(option);
             });
-            
+
             // Add the dropdown menu to the input element's parent
             modelIdInput.parentNode.appendChild(dropdownContainer);
-            
+
             return dropdownContainer;
         };
-        
+
         // Create dropdown menu
         const dropdown = createCustomDropdown();
         console.log(`Created custom dropdown with ${models.length} model options`);
-        
+
         // Add input event to automatically select category based on model name and filter dropdown options
         modelIdInput.addEventListener('input', function() {
             const modelValue = this.value.toLowerCase();
-            
+
             // Filter dropdown options based on input value
             const options = dropdown.querySelectorAll('div[data-value]');
             let hasVisibleOptions = false;
-            
+
             options.forEach(option => {
                 const optionValue = option.dataset.value.toLowerCase();
                 if (optionValue.includes(modelValue)) {
@@ -862,14 +978,14 @@ function hideError(container = errorMessageDiv) {
                     option.style.display = 'none';
                 }
             });
-            
+
             // If there are matching options, show the dropdown menu
             if (hasVisibleOptions && modelValue) {
                 dropdown.classList.remove('hidden');
             } else {
                 dropdown.classList.add('hidden');
             }
-            
+
             // Automatically select category based on input value
             if (modelValue.includes('pro')) {
                 modelCategorySelect.value = 'Pro';
@@ -881,7 +997,7 @@ function hideError(container = errorMessageDiv) {
                 modelQuotaInput.required = false;
             }
         });
-        
+
         // Add click event to show the dropdown menu
         modelIdInput.addEventListener('click', function() {
             if (models.length > 0) {
@@ -890,18 +1006,18 @@ function hideError(container = errorMessageDiv) {
                 options.forEach(option => {
                     option.style.display = 'block';
                 });
-                
+
                 dropdown.classList.remove('hidden');
             }
         });
-        
+
         // Hide dropdown menu when clicking elsewhere on the page
         document.addEventListener('click', function(e) {
             if (e.target !== modelIdInput && !dropdown.contains(e.target)) {
                 dropdown.classList.add('hidden');
             }
         });
-        
+
         // Remove datalist attribute from input if it exists
         modelIdInput.removeAttribute('list');
     }
@@ -924,7 +1040,7 @@ function hideError(container = errorMessageDiv) {
 
         // Split input, supporting comma-separated keys
         const geminiKeys = geminiKeyInput.split(',').map(key => key.trim()).filter(key => key !== '');
-        
+
         // Check if there are any keys to process
         if (geminiKeys.length === 0) {
             showError("No valid API Keys found.");
@@ -933,20 +1049,20 @@ function hideError(container = errorMessageDiv) {
 
         // Gemini API Key format validation regex
         const geminiKeyRegex = /^AIzaSy[A-Za-z0-9_-]{33}$/;
-        
+
         // Check format and remove duplicates
         const validKeys = [];
         const invalidKeys = [];
         const seenKeys = new Set();
-        
+
         for (const key of geminiKeys) {
             // Skip duplicates
             if (seenKeys.has(key)) {
                 continue;
             }
-            
+
             seenKeys.add(key);
-            
+
             // Validate format
             if (!geminiKeyRegex.test(key)) {
                 invalidKeys.push(key);
@@ -954,13 +1070,13 @@ function hideError(container = errorMessageDiv) {
                 validKeys.push(key);
             }
         }
-        
+
         // If no valid keys, exit
         if (validKeys.length === 0) {
             showError("No valid API Keys found. Please check the format.");
             return;
         }
-        
+
         // Show warnings about invalid keys but continue with valid ones
         if (invalidKeys.length > 0) {
             const maskedInvalidKeys = invalidKeys.map(key => {
@@ -971,24 +1087,24 @@ function hideError(container = errorMessageDiv) {
             });
             showError(`Invalid API key format detected: ${maskedInvalidKeys.join(', ')}`);
         }
-        
+
         // 改为串行处理API密钥添加，避免并发请求导致的问题
         showLoading();
         let successCount = 0;
-        
+
         // 逐个处理每个API Key
         for (const key of validKeys) {
             const keyData = {
                 key: key,
                 name: data.name ? data.name.trim() : ''
             };
-            
+
             try {
                 const result = await apiFetch('/gemini-keys', {
                     method: 'POST',
                     body: JSON.stringify(keyData),
                 });
-                
+
                 if (result && result.success) {
                     successCount++;
                 }
@@ -997,13 +1113,13 @@ function hideError(container = errorMessageDiv) {
                 // 继续处理下一个密钥
             }
         }
-        
+
         const failureCount = validKeys.length - successCount;
-        
+
         // Reset form and reload keys
         addGeminiKeyForm.reset();
         await loadGeminiKeys();
-        
+
         // Show appropriate message based on results
         if (successCount > 0) {
             showSuccess(`Successfully added ${successCount} Gemini ${successCount === 1 ? 'key' : 'keys'}.`);
@@ -1048,10 +1164,10 @@ function hideError(container = errorMessageDiv) {
                 if (result && result.success) {
                     // Get the corresponding card and data
                     const cardItem = document.querySelector(`.card-item[data-key-id="${keyId}"]`);
-                    
+
                     // Find the current key's data to get the usage value
                     const keyData = result.updatedKey || { usage: 0 }; // Use the updated key data from the API response if available, otherwise default to 0
-                    
+
                     // Replace the warning icon container with the Total display
                     const warningContainer = cardItem?.querySelector('.warning-icon-container');
                     if (warningContainer) {
@@ -1062,13 +1178,13 @@ function hideError(container = errorMessageDiv) {
                         `;
                         warningContainer.outerHTML = totalHTML;
                     }
-                    
+
                     // Remove error status text from modal
                     const errorStatusP = button.closest('.modal-content').querySelector('p.text-red-600');
                     if (errorStatusP) {
                         errorStatusP.remove();
                     }
-                    
+
                     // Remove the button itself
                     button.remove();
                     showSuccess(`Error status cleared for key ${keyId}.`);
@@ -1088,24 +1204,24 @@ function hideError(container = errorMessageDiv) {
     });
 
      // Add Worker Key with validation
-    addWorkerKeyForm.addEventListener('submit', async (e) => {
+     addWorkerKeyForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(addWorkerKeyForm);
         const data = Object.fromEntries(formData.entries());
-        
+
         // Validate worker key format - allow alphanumeric, hyphens, and underscores
         const workerKeyValue = data.key?.trim();
         if (!workerKeyValue) {
             showError('Worker key is required.');
             return;
         }
-        
+
         const validKeyRegex = /^[a-zA-Z0-9_\-]+$/;
         if (!validKeyRegex.test(workerKeyValue)) {
             showError('Worker key can only contain letters, numbers, underscores (_), and hyphens (-).');
             return;
         }
-        
+
         const result = await apiFetch('/worker-keys', {
             method: 'POST',
             body: JSON.stringify(data),
@@ -1159,12 +1275,12 @@ function hideError(container = errorMessageDiv) {
     generateWorkerKeyBtn.addEventListener('click', () => {
         const validChars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
         let randomKey = 'sk-';
-        
+
         for (let i = 0; i < 20; i++) {
             const randomIndex = Math.floor(Math.random() * validChars.length);
             randomKey += validChars[randomIndex];
         }
-        
+
         workerKeyValueInput.value = randomKey;
     });
 
@@ -1250,11 +1366,11 @@ function hideError(container = errorMessageDiv) {
         if (currentQuotas) {
             proQuotaInput.value = currentQuotas.proQuota ?? 50;
             flashQuotaInput.value = currentQuotas.flashQuota ?? 1500;
-            
+
             // Set placeholders to show default values
             proQuotaInput.placeholder = "Default: 50";
             flashQuotaInput.placeholder = "Default: 1500";
-            
+
             categoryQuotasModal.classList.remove('hidden');
         } else {
             showError("Could not load current category quotas.", categoryQuotasErrorDiv, categoryQuotasErrorDiv);
@@ -1358,7 +1474,7 @@ function hideError(container = errorMessageDiv) {
             individualQuotaModal.classList.add('hidden');
             await loadModels(); // Reload models to show updated quota
             await loadGeminiKeys(); // Reload keys as they display model usage
-            
+
             if (individualQuota > 0) {
                 showSuccess(`Individual quota for ${modelId} set to ${individualQuota}.`);
             } else {
@@ -1382,11 +1498,11 @@ function hideError(container = errorMessageDiv) {
                 method: 'GET',
                 credentials: 'include'
             });
-            
+
             // Check for redirects that might indicate auth issues
             if (response.redirected) {
                 const redirectUrl = new URL(response.url);
-                if (redirectUrl.pathname.includes('login') || 
+                if (redirectUrl.pathname.includes('login') ||
                     !redirectUrl.pathname.includes('/api/admin')) {
                     console.log('Detected redirect to login page. Session likely expired.');
                     localStorage.removeItem('isLoggedIn');
@@ -1396,7 +1512,7 @@ function hideError(container = errorMessageDiv) {
             }
 
             if (!response.ok) {
-                if (response.status === 401 || response.status === 403 || 
+                if (response.status === 401 || response.status === 403 ||
                     (response.status >= 300 && response.status < 400)) {
                     console.log(`User is not authorized. Auth check failed with status: ${response.status}. Redirecting to login page.`);
                     localStorage.removeItem('isLoggedIn');
@@ -1404,7 +1520,7 @@ function hideError(container = errorMessageDiv) {
                 }
                 return false;
             }
-            
+
             localStorage.setItem('isLoggedIn', 'true');
             authCheckingUI.classList.add('hidden');
             unauthorizedUI.classList.add('hidden');
@@ -1506,7 +1622,7 @@ function hideError(container = errorMessageDiv) {
 
     function setupAuthRefresh() {
         const authCheckInterval = 5 * 60 * 1000;
-        
+
         setInterval(async () => {
             console.log("Performing scheduled auth check...");
             try {
@@ -1514,19 +1630,19 @@ function hideError(container = errorMessageDiv) {
                     method: 'GET',
                     credentials: 'include'
                 });
-                
+
                 if (response.redirected) {
                     const redirectUrl = new URL(response.url);
-                    if (redirectUrl.pathname.includes('login') || 
+                    if (redirectUrl.pathname.includes('login') ||
                         !redirectUrl.pathname.includes('/api/admin')) {
                         console.log('Session expired during scheduled check. Redirecting to login.');
                         localStorage.removeItem('isLoggedIn');
                         window.location.href = '/login';
                     }
                 }
-                
+
                 if (!response.ok) {
-                    if (response.status === 401 || response.status === 403 || 
+                    if (response.status === 401 || response.status === 403 ||
                         (response.status >= 300 && response.status < 400)) {
                         console.log(`Auth check failed with status: ${response.status}. Redirecting to login.`);
                         localStorage.removeItem('isLoggedIn');
